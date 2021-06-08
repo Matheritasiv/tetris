@@ -1,0 +1,48 @@
+#include<windows.h>
+
+// Icon resources
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+100          ICON           ".\\tetris.ico"
+101          ICON           ".\\tetris_small.ico"
+102          ICON           ".\\start.ico"
+103          ICON           ".\\pause.ico"
+104          ICON           ".\\help.ico"
+105          ICON           ".\\terminate.ico"
+106          ICON           ".\\terminate_gray.ico"
+200          BITMAP         ".\\language.bmp"
+201          BITMAP         ".\\info.bmp"
+
+// Version Information resources
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+1 VERSIONINFO
+    FILEVERSION     1,0,0,1
+    PRODUCTVERSION  1,0,0,1
+    FILEOS          VOS_NT_WINDOWS32
+    FILETYPE        VFT_APP
+    FILESUBTYPE     VFT2_UNKNOWN
+    FILEFLAGSMASK   0
+    FILEFLAGS       0
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "0800C433"
+        {
+            VALUE "Comments", "202018008006001"
+            VALUE "CompanyName", "面向对象程序设计大作业"
+            VALUE "FileDescription", "Classic Tetris Game"
+            VALUE "FileVersion", "1.0"
+            VALUE "InternalName", "Tetris"
+            VALUE "LegalCopyright", "Matheritasiv@163.com"
+            VALUE "LegalTrademarks", ""
+            VALUE "OriginalFilename", "tetris.exe"
+            VALUE "PrivateBuild", ""
+            VALUE "ProductName", "Tetris"
+            VALUE "ProductVersion", "1.0"
+            VALUE "SpecialBuild", ""
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x0800, 0xC433
+    }
+}
