@@ -913,10 +913,11 @@ public:
 		if (!(killed[timer_lock] || paused || locked))
 			lock_piece();
 	}
-	void new_round(piece *);
+	void new_round(piece *new_pc) { new_round_ex(new_pc, false); }
 	void move_piece(int, int);
 	void draw_piece(void);
 	void refresh_piece(void);
+	piece *swap_piece(void);
 	void drop(void);
 	void soft_drop(bool);
 	void sonic_drop(bool);
@@ -931,7 +932,7 @@ private:
 	int pos_x, pos_y, distance, top_line = -1;
 	int lock_delay, drop_delay;
 	unsigned int soft_drop_scale;
-	bool locked, paused = false;
+	bool locked, paused = false, swapped;
 	bool killed[num_timer] = { false };
 	bool lock_delay_enabled, drop_delay_enabled;
 	bool lock_delay_status, soft_drop_status = false;
@@ -951,6 +952,7 @@ private:
 	//}}}
 	void new_piece(piece *);
 	void drop_ex(void);
+	void new_round_ex(piece *, bool);
 	void set_timer(timer_id timer, int delay) {
 		killed[timer] = false;
 		::set_timer(timer, delay);
@@ -984,8 +986,16 @@ void scene::new_piece(piece *p) {
 }
 //}}}
 //{{{ Start a new round
-void scene::new_round(piece *new_pc) {
-	new_piece(new_pc);
+void scene::new_round_ex(piece *new_pc, bool swap) {
+	if (swapped = swap) {
+		piece *pc = act_pc;
+		act_pc = next_pc;
+		next_pc = pc;
+		act_pc->set_scene(this);
+		next_pc->set_scene(NULL);
+	} else {
+		new_piece(new_pc);
+	}
 	locked = false;
 	lock_delay_enabled = true;
 	drop_delay_enabled = true;
@@ -1022,27 +1032,42 @@ void scene::draw_piece(void) {
 //{{{ Refresh the state accroding to current piece
 void scene::refresh_piece(void) {
 	int dist = distance;
-	if (!(distance = act_pc->get_distance()) == !dist) {
-		draw_piece();
-	} else if (dist) {
-		if (lock_delay_enabled) {
+	if (distance = act_pc->get_distance()) {
+		if (dist) {
+			draw_piece();
+		} else {
+			lock_delay_status = false;
+			kill_timer(timer_lock);
+			if (drop_delay_enabled) {
+				draw_piece();
+			} else {
+				drop_delay_enabled = true;
+				drop_ex();
+			}
+		}
+	} else if (!lock_delay_enabled) {
+		kill_timer(timer_lock);
+		lock_piece();
+	} else {
+		if (dist) {
 			lock_delay_status = true;
 			set_timer(timer_lock, lock_delay);
-			draw_piece();
-		} else {
-			kill_timer(timer_lock);
-			lock_piece();
 		}
-	} else {
-		lock_delay_status = false;
-		kill_timer(timer_lock);
-		if (drop_delay_enabled) {
-			draw_piece();
-		} else {
-			drop_delay_enabled = true;
-			drop_ex();
-		}
+		draw_piece();
 	}
+}
+//}}}
+//{{{ Swap the current piece and the next piece
+piece *scene::swap_piece(void) {
+	if (!act_pc || locked || swapped)
+		return NULL;
+	kill_timer(timer_drop);
+	kill_timer(timer_lock);
+	act_pc->draw_piece(pos_x, pos_y, sweep_block);
+	if (distance > 0)
+		act_pc->draw_piece(pos_x, pos_y - distance, sweep_block);
+	new_round_ex(NULL, true);
+	return next_pc;
 }
 //}}}
 //{{{ Drop and soft drop
@@ -1621,7 +1646,7 @@ int piece_I::rotate(bool) {
 			return -1;
 	}
 	if (lay_down)
-		kicked = true, sc->move_piece(2, -2 + res);
+		kicked = res > 0, sc->move_piece(2, -2 + res);
 	else
 		sc->move_piece(-2 + res, 2);
 	lay_down = !lay_down;
@@ -1781,6 +1806,15 @@ void next_round(uint8_t up) {
 			level_board->show_digit(game_scene->get_level());
 	}
 	next_round();
+}
+//}}}
+//{{{ Hold piece
+void hold_piece(void) {
+	piece *pc = game_scene->swap_piece();
+	if (pc) {
+		clear_timer_queue = true;
+		draw_next(pc);
+	}
 }
 //}}}
 //{{{ Start game
@@ -2108,8 +2142,14 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 				game_scene->sonic_drop(!game_scene->is_soft_drop());
 			break; //}}}
 		case VK_RETURN: //{{{
-			if (game_scene)
-				SendMessage(win, WM_COMMAND, (WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)win);
+			if (game_scene) {
+				if (game_scene->is_soft_drop() &&\
+					game_scene->is_running() &&\
+					!game_scene->is_paused())
+					hold_piece();
+				else
+					SendMessage(win, WM_COMMAND, (WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)win);
+			}
 			break; //}}}
 		}
 		return 0; //}}}
