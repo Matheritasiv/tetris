@@ -1247,10 +1247,11 @@ void scene::lock_piece(void) {
 void scene::level_up(void) {
 	if (++level == 1) {
 		drop_delay = lock_delay = 1000;
-	} else if (level < 20) {
+	} else if (level <= 20) {
 		drop_delay = 1000 / level;
 		lock_delay = 500;
 	} else {
+		drop_delay = 50;
 		lock_delay = (int)(500 / sqrt(level - 19)) + 1;
 	}
 }
