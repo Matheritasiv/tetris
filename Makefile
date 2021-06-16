@@ -10,7 +10,7 @@ RCOBJNAME       := $(PRJNAME:%=%.coff)
 VIM     := vim -c 'set nu fdm=marker noundofile nobackup'
 RC      := windres
 CXX     := g++
-CXXFLAGS:= -masm=intel
+CXXFLAGS:= -DASM -masm=intel
 LDFLAGS := -Wl,--subsystem,windows -static-libstdc++ -static-libgcc -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive -Wl,--high-entropy-va,--dynamicbase,--nxcompat
 
 TYPE	:= pe

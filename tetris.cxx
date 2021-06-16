@@ -964,16 +964,20 @@ private:
 };
 //{{{ Test if the specific position of stack is occupied
 bool scene::stack_test(int col, int line) {
-	bool ret;
 	if (line < 0 || line >= height + 4 || col < 0 || col >= width)
 		return true;
 	if (line >= height)
 		return false;
+#ifdef ASM
+	bool ret;
 	asm (
 		"bt      %1, %w2     \n\t"
 		"setc    %0          \n\t"
 	:"=r"(ret):"r"(stack[line]),"r"(col):"cc");
 	return ret;
+#else
+	return stack[line] & 1 << col;
+#endif
 }
 //}}}
 //{{{ Put a new piece to the scene
@@ -1296,7 +1300,9 @@ protected:
 };
 //{{{   Expand shape data
 uint16_t piece_3::expand(uint8_t src) {
-	uint16_t ret, tmp;
+	uint16_t ret;
+#ifdef ASM
+	uint16_t tmp;
 	asm (
 		"movzbw  %0, %1      \n\t"
 		"test    %b0, %b0    \n\t"
@@ -1327,6 +1333,23 @@ uint16_t piece_3::expand(uint8_t src) {
 		"shl     %w1, 13     \n\t"
 		"or      %0, %w1     \n.L%=.3:\t"
 	:"=&r"(ret):"r"(src),"r"(tmp):"cc");
+#else
+	ret = src;
+	src ^= src >> 4;
+	src ^= src >> 2;
+	src ^= src >> 1;
+	ret <<= 1;
+	ret |= src & 1;
+	src = ret & 7;
+	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	ret |= (uint16_t)src << 9;
+	src = ret >> 3 & 7;
+	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	ret |= (uint16_t)src << 11;
+	src = ret >> 6 & 7;
+	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	ret |= (uint16_t)src << 13;
+#endif
 	return ret;
 }
 //}}}
@@ -2194,11 +2217,11 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	rect.left = rect.right = 0;
 	rect.bottom = client_height;
 	rect.right = client_width;
-	AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_SIZEBOX), false);
+	AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, false);
 	rect.right -= rect.left;
 	rect.bottom -= rect.top;
 	if (!(window = CreateWindow(app_name, app_name,\
-		WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_SIZEBOX),\
+		(WS_OVERLAPPEDWINDOW | WS_VISIBLE) & ~(WS_MAXIMIZEBOX | WS_SIZEBOX),\
 		(GetSystemMetrics(SM_CXSCREEN) - rect.right) / 2,\
 		(GetSystemMetrics(SM_CYSCREEN) - rect.bottom) / 2,\
 		rect.right, rect.bottom,\
