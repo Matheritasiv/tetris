@@ -2187,6 +2187,9 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 //{{{ WinMain()
 int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	const char *app_name = "Tetris";
+	const unsigned int style =\
+		(WS_OVERLAPPEDWINDOW | WS_VISIBLE) &\
+		~(WS_MAXIMIZEBOX | WS_SIZEBOX);
 	MSG message;
 	WNDCLASSEX window_class;
 	RECT rect;
@@ -2217,11 +2220,10 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	rect.left = rect.right = 0;
 	rect.bottom = client_height;
 	rect.right = client_width;
-	AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, false);
+	AdjustWindowRect(&rect, style, false);
 	rect.right -= rect.left;
 	rect.bottom -= rect.top;
-	if (!(window = CreateWindow(app_name, app_name,\
-		(WS_OVERLAPPEDWINDOW | WS_VISIBLE) & ~(WS_MAXIMIZEBOX | WS_SIZEBOX),\
+	if (!(window = CreateWindow(app_name, app_name, style,\
 		(GetSystemMetrics(SM_CXSCREEN) - rect.right) / 2,\
 		(GetSystemMetrics(SM_CYSCREEN) - rect.bottom) / 2,\
 		rect.right, rect.bottom,\
@@ -2230,7 +2232,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 		gc::garbage_collect();
 		return -1;
 	}
-	ShowWindow(window, SW_SHOWDEFAULT);
+	ShowWindow(window, SW_SHOW);
 	UpdateWindow(window);
 	//}}}
 	//{{{ Message dispatch
