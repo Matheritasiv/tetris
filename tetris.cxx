@@ -2217,7 +2217,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	}
 	//}}}
 	//{{{ Create window at center
-	rect.left = rect.right = 0;
+	rect.left = rect.top = 0;
 	rect.bottom = client_height;
 	rect.right = client_width;
 	AdjustWindowRect(&rect, style, false);
