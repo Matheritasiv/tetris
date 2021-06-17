@@ -34,7 +34,7 @@ const int client_height   = (height + 2) * unit;
 
 //{{{ Memory control
 typedef void (*collector)(void *);
-//{{{ These wrappings must be done to fill up the gaps of ABI.
+//{{{ These wrappings must be done to fill up the gaps of ABI
 void delete_object (void *obj) { DeleteObject ((HGDIOBJ) obj); }
 void delete_dc     (void *obj) { DeleteDC     ((HDC)     obj); }
 void destroy_icon  (void *obj) { DestroyIcon  ((HICON)   obj); }
