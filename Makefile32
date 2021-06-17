@@ -1,0 +1,59 @@
+PRJNAME         := tetris
+LIBNAME         := gdi32
+
+EXENAME         := $(PRJNAME:%=%.exe)
+SRCNAME         := $(PRJNAME:%=%.cxx)
+OBJNAME         := $(PRJNAME:%=%.o)
+RCNAME          := $(PRJNAME:%=%.rc)
+RCOBJNAME       := $(PRJNAME:%=%.coff)
+
+VIM     := vim -c 'set nu fdm=marker noundofile nobackup'
+RC      := windres
+CXX     := g++
+CXXFLAGS:= 
+LDFLAGS := -Wl,--subsystem,windows -static-libstdc++ -static-libgcc -Wl,--dynamicbase,--nxcompat
+
+TYPE	:= pe
+ENDIAN	:= 
+MARCH	:= i386:
+ARCH	:= i386
+
+all: LDFLAGS += -s
+all: CXXFLAGS += -O3
+all: $(EXENAME)
+
+debug: CXXFLAGS += -g -O0
+debug: $(EXENAME)
+
+asc16.o: ASC16
+	objcopy -Ibinary -O$(TYPE)-$(ENDIAN)$(ARCH) -B$(MARCH)$(ARCH) $< $@
+
+asc24.o: ASC24
+	objcopy -Ibinary -O$(TYPE)-$(ENDIAN)$(ARCH) -B$(MARCH)$(ARCH) $< $@
+
+$(RCOBJNAME): $(RCNAME) $(wildcard *.ico *.bmp)
+	$(RC) $< $@
+
+$(OBJNAME): $(SRCNAME)
+	$(CXX) -c $(CXXFLAGS) $^ -o $@
+
+$(EXENAME): $(OBJNAME) $(RCOBJNAME) asc16.o asc24.o
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LIBNAME:%=-l%)
+
+edit: $(SRCNAME)
+	$(VIM) $^
+
+edit_rc: $(RCNAME)
+	$(VIM) $^
+
+edit_mk: Makefile
+	$(VIM) $^
+
+clean:
+	-del *.o 2>nul
+	-del *.coff 2>nul
+
+delete:
+	-del $(EXENAME) 2>nul
+
+.PHONY: all debug edit edit_rc edit_mk clean delete

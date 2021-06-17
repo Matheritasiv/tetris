@@ -34,6 +34,11 @@ const int client_height   = (height + 2) * unit;
 
 //{{{ Memory control
 typedef void (*collector)(void *);
+//{{{ These wrappings must be done to fill up the gaps of ABI.
+void delete_object (void *obj) { DeleteObject ((HGDIOBJ) obj); }
+void delete_dc     (void *obj) { DeleteDC     ((HDC)     obj); }
+void destroy_icon  (void *obj) { DestroyIcon  ((HICON)   obj); }
+//}}}
 class gc {
 public:
 	gc(void *obj, collector fun) { cons(false, obj, fun); }
@@ -615,7 +620,7 @@ void default_animation_end(void) {
 void show_language(void) {
 	static int frame, offset;
 	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(200));
-	static gc *dummy = new gc(bmp, (collector)DeleteObject);
+	static gc *dummy = new gc(bmp, delete_object);
 	const int num = 13;
 	const int w = 150;
 	const int h = 30;
@@ -795,7 +800,7 @@ void draw_pause(void) {
 void draw_help(void) {
 	static int frame, offset;
 	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(201));
-	static gc *dummy = new gc(bmp, (collector)DeleteObject);
+	static gc *dummy = new gc(bmp, delete_object);
 	const int w = 300;
 	const int h = 600;
 	int wd = main_board->get_width();
@@ -1916,7 +1921,7 @@ void game_over(void) {
 		frame++;
 	};
 	if (!bmp_title) {
-		new gc((collector)DeleteObject,
+		new gc(delete_object,
 		bmp_title = new_bitmap(wd, ht_title));
 		HBITMAP old_bmp = (HBITMAP)SelectObject(hdc_sub, bmp_title);
 		fill_bg(hdc_sub, wd, ht_title);
@@ -1925,7 +1930,7 @@ void game_over(void) {
 		SelectObject(hdc_sub, old_bmp);
 	}
 	if (!bmp_stat) {
-		new gc((collector)DeleteObject,
+		new gc(delete_object,
 		bmp_stat = new_bitmap(wd, ht_stat));
 	}
 	started = game_scene->is_running();
@@ -1971,9 +1976,9 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 	switch (msg) {
 	case WM_CREATE: //{{{
 		hdc = GetDC(win);
-		new gc((collector)DeleteDC,
+		new gc(delete_dc,
 		hdc_main = CreateCompatibleDC(hdc));
-		new gc((collector)DeleteDC,
+		new gc(delete_dc,
 		hdc_sub = CreateCompatibleDC(hdc));
 		DeleteObject(SelectObject(hdc_main,\
 			CreateCompatibleBitmap(hdc, client_width, client_height)));
@@ -1982,9 +1987,9 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | BS_ICON,\
 			x, y - size_big, size_big, size_big,\
 			win, (HMENU)id_start, instance, NULL);
-		new gc((collector)DestroyIcon,
+		new gc(destroy_icon,
 		ico_start = LoadIcon(instance, MAKEINTRESOURCE(102)));
-		new gc((collector)DestroyIcon,
+		new gc(destroy_icon,
 		ico_pause = LoadIcon(instance, MAKEINTRESOURCE(103)));
 		SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_start);
 		button_help = CreateWindow("button", NULL,\
@@ -1992,7 +1997,7 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			client_width - unit - size_small, y - size_big,\
 			size_small, size_small,\
 			win, (HMENU)id_help, instance, NULL);
-		new gc((collector)DestroyIcon,
+		new gc(destroy_icon,
 		ico_term = LoadIcon(instance, MAKEINTRESOURCE(104)));
 		SendMessage(button_help, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_term);
 		button_terminate = CreateWindow("button", NULL,\
@@ -2000,9 +2005,9 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			client_width - unit - size_small, y - size_small,\
 			size_small, size_small,\
 			win, (HMENU)id_terminate, instance, NULL);
-		new gc((collector)DestroyIcon,
+		new gc(destroy_icon,
 		ico_term = LoadIcon(instance, MAKEINTRESOURCE(105)));
-		new gc((collector)DestroyIcon,
+		new gc(destroy_icon,
 		ico_term_gray = LoadIcon(instance, MAKEINTRESOURCE(106)));
 		SendMessage(button_terminate, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_term_gray);
 		return 0; //}}}
@@ -2201,14 +2206,14 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	window_class.cbClsExtra    = 0;
 	window_class.cbWndExtra    = 0;
 	window_class.hInstance     = instance;
-	new gc((collector)DestroyIcon,
+	new gc(destroy_icon,
 	window_class.hIcon         = LoadIcon(instance, MAKEINTRESOURCE(100)));
 	window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
-	new gc((collector)DeleteObject,
+	new gc(delete_object,
 	window_class.hbrBackground = CreateSolidBrush(gray));
 	window_class.lpszMenuName  = NULL;
 	window_class.lpszClassName = app_name;
-	new gc((collector)DestroyIcon,
+	new gc(destroy_icon,
 	window_class.hIconSm       = LoadIcon(instance, MAKEINTRESOURCE(101)));
 	if (!RegisterClassEx(&window_class)) {
 		MessageBox(NULL, "RegisterClassEx() Failed!", "Fatal", MB_ICONERROR);
