@@ -1337,16 +1337,12 @@ uint16_t piece_3::expand(uint8_t src) {
 	src ^= src >> 4;
 	src ^= src >> 2;
 	src ^= src >> 1;
-	ret <<= 1;
-	ret |= src & 1;
-	src = ret & 7;
-	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	ret = ret << 1 | src & 1;
+	src = ret & 0001 ? 3 : ret & 0002 ? 2 : ret & 0004 ? 1 : 0;
 	ret |= (uint16_t)src << 9;
-	src = ret >> 3 & 7;
-	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	src = ret & 0010 ? 3 : ret & 0020 ? 2 : ret & 0040 ? 1 : 0;
 	ret |= (uint16_t)src << 11;
-	src = ret >> 6 & 7;
-	src = src & 1 ? 3 : src & 2 ? 2 : src & 4 ? 1 : 0;
+	src = ret & 0100 ? 3 : ret & 0200 ? 2 : ret & 0400 ? 1 : 0;
 	ret |= (uint16_t)src << 13;
 #endif
 	return ret;
