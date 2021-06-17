@@ -46,7 +46,7 @@ public:
 	gc(bool st, void *obj, collector fun) { cons(st, obj, fun); }
 	~gc(void) {
 		collector(object);
-		if (dynamic && next_gc)
+		if (dynamic)
 			delete next_gc;
 	}
 	static void garbage_collect_dynamic(void);
@@ -82,10 +82,8 @@ void gc::cons(bool st, void *obj, ::collector fun) {
 }
 
 void gc::garbage_collect_dynamic(void) {
-	if (allocated_objects) {
-		delete allocated_objects;
-		allocated_objects = NULL;
-	}
+	delete allocated_objects;
+	allocated_objects = NULL;
 }
 
 void gc::garbage_collect_static(void) {
@@ -886,10 +884,7 @@ private:
 class scene {
 public:
 	scene(piece *p) { new_piece(p); level_up(); }
-	~scene(void) {
-		if (act_pc) delete act_pc;
-		if (next_pc) delete next_pc;
-	}
+	~scene(void) { delete act_pc; delete next_pc; }
 	bool stack_test(int, int);
 	int get_pos_x(void) { return pos_x; }
 	int get_pos_y(void) { return pos_y; }
@@ -987,8 +982,7 @@ bool scene::stack_test(int col, int line) {
 //}}}
 //{{{ Put a new piece to the scene
 void scene::new_piece(piece *p) {
-	if (act_pc)
-		delete act_pc;
+	delete act_pc;
 	if (act_pc = next_pc)
 		act_pc->set_scene(this);
 	next_pc = p;
@@ -1849,10 +1843,8 @@ void hold_piece(void) {
 //{{{ Start game
 void start_game(void) {
 	static gc *dummy = new gc(NULL, [] (void *) {
-		if (game_scene) {
-			delete game_scene;
-			game_scene = NULL;
-		}
+		delete game_scene;
+		game_scene = NULL;
 	});
 	kill_timer(timer_animation);
 	clear_timer_queue = true;
@@ -2192,8 +2184,7 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 //{{{ WinMain()
 int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	const char *app_name = "Tetris";
-	const unsigned int style =\
-		(WS_OVERLAPPEDWINDOW | WS_VISIBLE) &\
+	const unsigned int style = WS_OVERLAPPEDWINDOW &\
 		~(WS_MAXIMIZEBOX | WS_SIZEBOX);
 	MSG message;
 	WNDCLASSEX window_class;
