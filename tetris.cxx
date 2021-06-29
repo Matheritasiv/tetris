@@ -5,6 +5,9 @@
 #include<map>
 #include<windows.h>
 #include<windowsx.h>
+#include<shlwapi.h>
+#define __IN_CODE__
+#include"tetris.rc"
 
 using namespace std;
 
@@ -285,8 +288,11 @@ void put_string(HDC hdc, bool big, bool slant, int scale,\
 //}}}
 //}}}
 //{{{ Timer control
-typedef enum { timer_drop, timer_lock, timer_animation } timer_id;
-const int num_timer = 3;
+typedef enum {
+	timer_drop, timer_lock, timer_animation,
+	timer_action, timer_second
+} timer_id;
+const int num_timer = 5;
 bool clear_timer_queue = false;
 void kill_all_timer(void);
 
@@ -617,7 +623,7 @@ void default_animation_end(void) {
 //{{{ Show various languages
 void show_language(void) {
 	static int frame, offset;
-	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(200));
+	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(IDB_LANG));
 	static gc *dummy = new gc(bmp, delete_object);
 	const int num = 13;
 	const int w = 150;
@@ -773,10 +779,9 @@ void clear_line(int *clear, int top_line) {
 	ani_clear_line();
 }
 //}}}
-//{{{ Draw pause frame
-void draw_pause(void) {
+//{{{ Draw info frame
+void draw_info_frame(const char *title) {
 	HBITMAP bmp, old_bmp;
-	const char *title = "PAUSE";
 	const int size = 3;
 	const int h = 16 * size;
 	int wd = main_board->get_width();
@@ -793,11 +798,16 @@ void draw_pause(void) {
 	main_board->draw_bitmap(bmp, 0, y, wd, h);
 	DeleteObject(bmp);
 }
+
+inline void draw_pause(void) { draw_info_frame("PAUSE"); }
+inline void draw_exception(bool write) {
+	draw_info_frame(write ? "ERR: WRITE" : "ERR: READ");
+}
 //}}}
 //{{{ Draw help frame
 void draw_help(void) {
 	static int frame, offset;
-	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(201));
+	static HBITMAP bmp = LoadBitmap(instance, MAKEINTRESOURCE(IDB_INFO));
 	static gc *dummy = new gc(bmp, delete_object);
 	const int w = 300;
 	const int h = 600;
@@ -851,8 +861,237 @@ void notify_game_over(void) {
 	kill_all_timer();
 	clear_timer_queue = true;
 	stop_animation();
-	SendMessage(window, WM_COMMAND, (WPARAM)BN_CLICKED << 16 | id_terminate, (LPARAM)window);
+	SendMessage(window, WM_COMMAND,\
+		(WPARAM)BN_CLICKED << 16 | id_terminate, (LPARAM)window);
 	game_over();
+}
+//}}}
+//}}}
+//{{{ Record control -- Part I
+typedef enum {
+	event_T, event_O, event_I, event_S,
+	event_Z, event_L, event_J,
+	event_lock, event_drop, event_hold,
+	event_shift_left, event_shift_right,
+	event_rotate_ccw, event_rotate_cw,
+	event_drop_sonic, event_drop_hard,
+	event_pause, event_resume
+} log_event;
+const log_event event_piece = event_J;
+void (*tetris_log)(log_event);
+
+char *record_file_name;
+HANDLE record_file = INVALID_HANDLE_VALUE;
+DWORD last_io;
+void end_record(void);
+int global_exception;
+const int exception_write = 1;
+const int exception_read = 2;
+//{{{ Record bar
+const int bar_top = 7;
+const int bar_time_left = 80;
+
+void flush_record_bar(bool time, bool clear) {
+	RECT rect;
+	rect.left = time ? bar_time_left : 0;
+	rect.top = bar_top;
+	rect.right = client_width;
+	rect.bottom = bar_top + 16;
+	if (clear) {
+		HBRUSH brush = CreateSolidBrush(gray);
+		FillRect(hdc_main, &rect, brush);
+		DeleteObject(brush);
+	}
+	InvalidateRect(window, &rect, false);
+}
+
+inline void flush_record_bar(bool clear) {
+	flush_record_bar(false, clear);
+}
+
+void bar_show_record(bool record) {
+	const int dot_left = 15;
+	const int tri_left = dot_left + 2;
+	int color;
+	const char *text;
+	HRGN region;
+	if (record) {
+		color = red;
+		text = "REC";
+		region = CreateEllipticRgn(\
+			dot_left, bar_top + 4,\
+			dot_left + 7, bar_top + 11);
+	} else {
+		POINT p[3];
+		color = lime;
+		text = "PLAY";
+		p[0].x = p[2].x = tri_left;
+		p[1].x = tri_left + 4;
+		p[0].y = bar_top + 2;
+		p[1].y = bar_top + 6;
+		p[2].y = bar_top + 10;
+		region = CreatePolygonRgn(p, 3, ALTERNATE);
+	}
+	HBRUSH brush = CreateSolidBrush(color);
+	FillRgn(hdc_main, region, brush);
+	DeleteObject(brush);
+	DeleteObject(region);
+	put_string(hdc_main, false, false, 1,\
+		27, bar_top, text, -1, 0, color);
+	flush_record_bar(false);
+}
+
+void bar_show_time(unsigned int second) {
+	const unsigned int max_digit = 1000000000;
+	unsigned int minute, hour;
+	int pos_x = bar_time_left, offset;
+	char buffer[11];
+	flush_record_bar(true, true);
+	minute = second / 60;
+	second %= 60;
+	if (hour = minute / 60) {
+		minute %= 60;
+		if (hour > max_digit)
+			hour %= max_digit;
+		offset = snprintf(buffer, 11, "%u:", hour);
+		put_string(hdc_main, false, false, 1,\
+			pos_x, bar_top, buffer, offset, 0, white);
+		pos_x += offset * 8;
+	}
+	sprintf(buffer, "%02u:%02u", minute, second);
+	put_string(hdc_main, false, false, 1,\
+		pos_x, bar_top, buffer, 5, 0, white);
+}
+//}}}
+//{{{ Record second
+void msecond_clock(int duration) {
+	static bool reverse;
+	static int second;
+	static clock_t end;
+	if (duration == -1) {
+		if (reverse) {
+			duration = (end - clock()) /\
+				(CLOCKS_PER_SEC / 1000) - 500;
+			int rem = duration % 1000;
+			duration /= 1000;
+			if (rem <= 0)
+				rem += 1000;
+			else
+				duration++;
+			bar_show_time(duration);
+			if (duration > 0)
+				set_timer(timer_second, rem + 500);
+		} else {
+			duration = (clock() - end) /\
+				(CLOCKS_PER_SEC / 1000) + 500;
+			int rem = duration % 1000;
+			duration /= 1000;
+			bar_show_time(duration);
+			set_timer(timer_second, 1500 - rem);
+		}
+	} else if (duration < -1) {
+		end += (-1 - duration) * (CLOCKS_PER_SEC / 1000);
+	} else if (duration == 0) {
+		reverse = false;
+		end = clock();
+		bar_show_time(0);
+		set_timer(timer_second, 1000);
+	} else if (duration > 0) {
+		reverse = true;
+		end = clock() + duration * (CLOCKS_PER_SEC / 1000);
+		int rem = duration % 1000;
+		duration /= 1000;
+		if (rem == 0)
+			rem = 1000;
+		else
+			duration++;
+		bar_show_time(duration);
+		set_timer(timer_second, rem);
+	}
+}
+
+inline void msecond_clock(void) {
+	msecond_clock(0);
+}
+inline void msecond_clock_reverse(int duration) {
+	if (duration > 0)
+		msecond_clock(duration);
+}
+inline void msecond_clock_adjust(int duration) {
+	if (duration > 0)
+		msecond_clock(-1 - duration);
+}
+void second_callback(void) {
+	msecond_clock(-1);
+}
+//}}}
+//{{{ Record procedure
+void tetris_record(log_event e) {
+	char buffer[4];
+	int size;
+	static clock_t this_time, last_time;
+	if (!last_io && e <= event_piece) {
+		last_time = clock();
+		buffer[0] = '\x7F';
+		buffer[1] = 'F' ^ (e & 1) << 5;
+		buffer[2] = 'U' ^ (e & 2) << 4;
+		buffer[3] = 'N' ^ (e & 4) << 3;
+		size = 4;
+	} else if (e == event_pause) {
+		this_time = clock();
+		stop_timer(timer_second);
+		return;
+	} else if (e == event_resume) {
+		clock_t t = clock() - this_time;
+		last_time += t;
+		msecond_clock_adjust(t / (CLOCKS_PER_SEC / 1000));
+		resume_timer(timer_second);
+		return;
+	} else {
+		this_time = clock();
+		uint16_t code = (this_time - last_time) /\
+			(CLOCKS_PER_SEC / 1000);
+		last_time = this_time;
+		code = code << 5 | e;
+		*(uint16_t*)buffer = code;
+		size = 2;
+	}
+	if (!WriteFile(record_file, buffer, size, &last_io, NULL) ||\
+		last_io != size) {
+		global_exception = exception_write;
+		end_record();
+		DeleteFile(record_file_name);
+	}
+	return;
+}
+//}}}
+//{{{ Record preparation
+bool begin_record(void) {
+	static gc *dummy = new gc(NULL, [] (void *) {
+		end_record();
+	});
+	if ((record_file = CreateFile(\
+		record_file_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,\
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL))\
+			== INVALID_HANDLE_VALUE) {
+		MessageBox(NULL, "CreateFile() Failed!", "Error", MB_ICONERROR);
+		return false;
+	}
+	tetris_log = tetris_record;
+	bar_show_record(true);
+	msecond_clock();
+	return true;
+}
+//}}}
+//{{{ Record cleanup
+void end_record(void) {
+	if (record_file != INVALID_HANDLE_VALUE) {
+		CloseHandle(record_file);
+		record_file = INVALID_HANDLE_VALUE;
+		flush_record_bar(true);
+	}
+	last_io = 0;
+	tetris_log = NULL;
 }
 //}}}
 //}}}
@@ -883,17 +1122,30 @@ private:
 //}}}
 class scene {
 public:
-	scene(piece *p) { new_piece(p); level_up(); }
+	scene(piece *p, bool d = false) { demo = d; new_piece(p); level_up(); }
 	~scene(void) { delete act_pc; delete next_pc; }
 	bool stack_test(int, int);
 	int get_pos_x(void) { return pos_x; }
 	int get_pos_y(void) { return pos_y; }
 	bool is_running(void) { return (bool)act_pc; }
 	bool is_paused(void) { return paused; }
+	bool is_demo(void) { return demo; }
 	bool is_soft_drop(void) { return soft_drop_status; }
 	void disable_lock_delay(void) { lock_delay_enabled = false; }
-	void shift_piece(bool left) { if (act_pc && !locked) act_pc->shift(left); }
-	void rotate_piece(bool cw) { if (act_pc && !locked) act_pc->rotate(cw); }
+	void shift_piece(bool right) {
+		if (locked)
+			return;
+		if (tetris_log)
+			tetris_log((log_event)(event_shift_left | right));
+		act_pc->shift(right);
+	}
+	void rotate_piece(bool cw) {
+		if (locked)
+			return;
+		if (tetris_log)
+			tetris_log((log_event)(event_rotate_ccw | cw));
+		act_pc->rotate(cw);
+	}
 	//{{{ Get statistical information
 	unsigned int get_level(void) { return level; }
 	unsigned int get_score(void) { return score; }
@@ -906,12 +1158,18 @@ public:
 	unsigned int get_total_bravo(void) { return total_bravo; }
 	//}}}
 	void drop_callback(void) {
-		if (!(killed[timer_drop] || paused || locked))
+		if (!(killed[timer_drop] || paused || locked)) {
+			if (tetris_log)
+				tetris_log(event_drop);
 			drop();
+		}
 	}
 	void lock_callback(void) {
-		if (!(killed[timer_lock] || paused || locked))
+		if (!(killed[timer_lock] || paused || locked)) {
+			if (tetris_log)
+				tetris_log(event_lock);
 			lock_piece();
+		}
 	}
 	void new_round(piece *new_pc) { new_round_ex(new_pc, false); }
 	void move_piece(int, int);
@@ -932,7 +1190,7 @@ private:
 	int pos_x, pos_y, distance, top_line = -1;
 	int lock_delay, drop_delay;
 	unsigned int soft_drop_scale;
-	bool locked, paused = false, swapped;
+	bool demo, locked, paused = false, swapped;
 	bool killed[num_timer] = { false };
 	bool lock_delay_enabled, drop_delay_enabled;
 	bool lock_delay_status, soft_drop_status = false;
@@ -954,10 +1212,14 @@ private:
 	void drop_ex(void);
 	void new_round_ex(piece *, bool);
 	void set_timer(timer_id timer, int delay) {
+		if (demo)
+			return;
 		killed[timer] = false;
 		::set_timer(timer, delay);
 	}
 	void kill_timer(timer_id timer) {
+		if (demo)
+			return;
 		killed[timer] = true;
 		::kill_timer(timer);
 	}
@@ -1064,6 +1326,8 @@ void scene::refresh_piece(void) {
 piece *scene::swap_piece(void) {
 	if (!act_pc || locked || swapped)
 		return NULL;
+	if (tetris_log)
+		tetris_log(event_hold);
 	kill_timer(timer_drop);
 	kill_timer(timer_lock);
 	act_pc->draw_piece(pos_x, pos_y, sweep_block);
@@ -1105,12 +1369,20 @@ void scene::soft_drop(bool s) {
 	if (!(soft_drop_status = s))
 		return;
 	soft_drop_scale = 4;
+	if (locked)
+		return;
 	kill_timer(timer_drop);
+	if (tetris_log)
+		tetris_log(event_drop);
 	drop();
 }
 //}}}
 //{{{ Sonic drop and hard drop
 void scene::sonic_drop(bool hard) {
+	if (locked)
+		return;
+	if (tetris_log)
+		tetris_log((log_event)(event_drop_sonic | hard));
 	if (distance == 0) {
 		if (hard) {
 			kill_timer(timer_lock);
@@ -1130,7 +1402,7 @@ void scene::sonic_drop(bool hard) {
 	set_timer(timer_lock, lock_delay);
 	draw_piece();
 	set_timer(timer_drop, soft_drop_status ?\
-		(int)(drop_delay / sqrt(soft_drop_scale += 1)) + 1 :\
+		(int)(drop_delay / sqrt(soft_drop_scale++)) + 1 :\
 		drop_delay);
 }
 //}}}
@@ -1263,12 +1535,16 @@ void scene::level_up(void) {
 void scene::control(bool pause) {
 	if (!paused) {
 		if (pause) {
+			if (tetris_log)
+				tetris_log(event_pause);
 			paused = true;
 			stop_timer(timer_drop);
 			stop_timer(timer_lock);
 		}
 	} else {
 		if (!pause) {
+			if (tetris_log)
+				tetris_log(event_resume);
 			paused = false;
 			resume_timer(timer_drop);
 			resume_timer(timer_lock);
@@ -1378,9 +1654,9 @@ int piece_3::rotate_gen(uint16_t new_shape_code, bool center_column) {
 //}}}
 //{{{   Shift the piece to the new position in scene,
 //      non-negative return value means a successful shift.
-int piece_3::shift(bool left) {
+int piece_3::shift(bool right) {
 	uint16_t code = shape_code;
-	int x, y, dx = left ? -1 : 1;
+	int x, y, dx = right ? 1 : -1;
 	x = sc->get_pos_x() + dx;
 	y = sc->get_pos_y();
 	for (int i = 2; i >= 0; i--)
@@ -1676,28 +1952,28 @@ int piece_I::rotate(bool) {
 }
 //}}}
 //{{{   Shift
-int piece_I::shift(bool left) {
+int piece_I::shift(bool right) {
 	int x, y;
 	x = sc->get_pos_x();
 	y = sc->get_pos_y();
 	if (lay_down) {
-		if (left && sc->stack_test(x - 1, y) ||\
-			!left && sc->stack_test(x + 4, y))
+		if (right && sc->stack_test(x + 4, y) ||\
+			!right && sc->stack_test(x - 1, y))
 			return -1;
 	} else {
-		if (left && (\
-				sc->stack_test(x - 1, y) ||\
-				sc->stack_test(x - 1, y + 1) ||\
-				sc->stack_test(x - 1, y + 2) ||\
-				sc->stack_test(x - 1, y + 3)) ||\
-			!left && (\
+		if (right && (\
 				sc->stack_test(x + 1, y) ||\
 				sc->stack_test(x + 1, y + 1) ||\
 				sc->stack_test(x + 1, y + 2) ||\
-				sc->stack_test(x + 1, y + 3)))
+				sc->stack_test(x + 1, y + 3)) ||\
+			!right && (\
+				sc->stack_test(x - 1, y) ||\
+				sc->stack_test(x - 1, y + 1) ||\
+				sc->stack_test(x - 1, y + 2) ||\
+				sc->stack_test(x - 1, y + 3)))
 			return -1;
 	}
-	sc->move_piece(left ? -1 : 1, 0);
+	sc->move_piece(right ? 1 : -1, 0);
 	sc->refresh_piece();
 	return 0;
 }
@@ -1778,14 +2054,16 @@ piece *piece::random_piece(void) {
 			break;
 	}
 	record = record << 4 | index;
-	switch (index) {
-	case 0: return new piece_T;
-	case 1: return new piece_O;
-	case 2: return new piece_I;
-	case 3: return new piece_S;
-	case 4: return new piece_Z;
-	case 5: return new piece_L;
-	case 6: return new piece_J;
+	if (tetris_log)
+		tetris_log((log_event)index);
+	switch ((log_event)index) {
+	case event_T: return new piece_T;
+	case event_O: return new piece_O;
+	case event_I: return new piece_I;
+	case event_S: return new piece_S;
+	case event_Z: return new piece_Z;
+	case event_L: return new piece_L;
+	case event_J: return new piece_J;
 	}
 	return NULL;
 }
@@ -1797,8 +2075,182 @@ void piece::random_reset(unsigned int seed) {
 //}}}
 //}}}
 
-//{{{ UI control -- Part II
+//{{{ Record control -- Part II
 scene *game_scene;
+char *initial_play;
+//{{{ Get piece by index
+piece *get_piece(log_event index) {
+	switch (index) {
+	case event_T: return new piece_T;
+	case event_O: return new piece_O;
+	case event_I: return new piece_I;
+	case event_S: return new piece_S;
+	case event_Z: return new piece_Z;
+	case event_L: return new piece_L;
+	case event_J: return new piece_J;
+	}
+	return NULL;
+}
+//}}}
+//{{{ Record file format analysis
+piece *record_first_piece(const char *file_name) {
+	static gc *dummy = new gc(NULL, [] (void *) {
+		end_record();
+	});
+	bool success = false;
+	int duration = 0;
+	uint32_t index;
+	uint16_t code;
+	if ((record_file = CreateFile(\
+		file_name, GENERIC_READ, 0, NULL, OPEN_EXISTING,\
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL))\
+			== INVALID_HANDLE_VALUE) {
+		MessageBox(NULL, "CreateFile() Failed!", "Error", MB_ICONERROR);
+		return NULL;
+	}
+	if (!ReadFile(record_file, &index, 4, &last_io, NULL) || last_io != 4 ||\
+		(index ^= 0x6E75667F) & ~0x20202000 || !index) {
+		MessageBox(NULL, "Incorrect file format!", "Error", MB_ICONERROR);
+		end_record();
+		return NULL;
+	}
+	index = ~(index >> 13 | index >> 20 | index >> 27) & 7;
+	while (ReadFile(record_file, &code, 2, &last_io, NULL)) {
+		if (last_io == 0) {
+			success = true;
+			break;
+		} else if (last_io == 1) {
+			MessageBox(NULL, "Truncated file!", "Error", MB_ICONERROR);
+			end_record();
+			return NULL;
+		} else {
+			duration += code >> 5;
+		}
+	}
+	if (!success) {
+		MessageBox(NULL, "Unable to read file!", "Error", MB_ICONERROR);
+		end_record();
+		return NULL;
+	}
+	SetFilePointer(record_file, 4, 0, FILE_BEGIN);
+	if (duration == 0)
+		duration = 1;
+	bar_show_record(false);
+	msecond_clock_reverse(duration);
+	return get_piece((log_event)index);
+}
+//}}}
+//{{{ Record play
+void next_round(piece *);
+void hold_piece(void);
+
+void record_play(int caller) {
+	uint16_t code;
+	log_event ne;
+	static bool recurse;
+	static log_event e;
+	static clock_t next;
+	if (caller < -1) {
+		next += (-1 - caller) * (CLOCKS_PER_SEC / 1000);
+		return;
+	}
+	if (recurse)
+		goto __exit;
+__start_0:
+	recurse = true;
+__start_1:
+	if (!ReadFile(record_file, &code, 2, &last_io, NULL) ||\
+		last_io == 1) {
+		global_exception = exception_read;
+		goto __exit;
+	}
+	if (last_io == 0) {
+		notify_game_over();
+		goto __exit;
+	}
+	ne = (log_event)(code & 0x1F);
+	code >>= 5;
+	if (caller == 0)
+		next = clock();
+	else if (e <= event_piece)
+		next_round(get_piece(e));
+	else
+		switch (e) {
+		case event_lock:
+			game_scene->lock_piece();
+			break;
+		case event_drop:
+			game_scene->drop();
+			break;
+		case event_hold:
+			hold_piece();
+			break;
+		case event_shift_left:
+			game_scene->shift_piece(false);
+			break;
+		case event_shift_right:
+			game_scene->shift_piece(true);
+			break;
+		case event_rotate_ccw:
+			game_scene->rotate_piece(false);
+			break;
+		case event_rotate_cw:
+			game_scene->rotate_piece(true);
+			break;
+		case event_drop_sonic:
+			game_scene->sonic_drop(false);
+			break;
+		case event_drop_hard:
+			game_scene->sonic_drop(true);
+			break;
+		}
+	next += code * (CLOCKS_PER_SEC / 1000);
+	e = ne;
+	if (!recurse)
+		goto __start_0;
+	if (e > event_piece) {
+		int rem = (next - clock()) / (CLOCKS_PER_SEC / 1000);
+		if (rem <= 0) {
+			UpdateWindow(window);
+			goto __start_1;
+		}
+		set_timer(timer_action, rem);
+	}
+__exit:
+	recurse = false;
+	return;
+}
+
+void record_play(void) {
+	record_play(1);
+}
+inline void record_play_adjust(int duration) {
+	if (duration > 0)
+		record_play(-1 - duration);
+}
+inline void action_callback(void) {
+	record_play(-1);
+}
+//}}}
+//{{{ Demo control
+void demo_control(bool pause) {
+	static clock_t last;
+	if (pause) {
+		last = clock();
+		stop_timer(timer_action);
+		stop_timer(timer_second);
+	} else {
+		int t = (clock() - last) / (CLOCKS_PER_SEC / 1000);
+		record_play_adjust(t);
+		msecond_clock_adjust(t);
+		resume_timer(timer_action);
+		resume_timer(timer_second);
+	}
+	return;
+}
+//}}}
+//}}}
+//{{{ UI control -- Part II
 //{{{ Draw next piece
 void draw_next(piece *pc) {
 	static int offset_x, offset_y;
@@ -1811,10 +2263,12 @@ void draw_next(piece *pc) {
 }
 //}}}
 //{{{ Next round
-void next_round(void) {
-	piece *pc = piece::random_piece();
+void next_round(piece *pc) {
 	draw_next(pc);
 	game_scene->new_round(pc);
+}
+inline void next_round(void) {
+	next_round(piece::random_piece());
 }
 
 void next_round(uint8_t up) {
@@ -1824,7 +2278,10 @@ void next_round(uint8_t up) {
 		if (--up)
 			level_board->show_digit(game_scene->get_level());
 	}
-	next_round();
+	if (game_scene->is_demo())
+		record_play();
+	else
+		next_round();
 }
 //}}}
 //{{{ Hold piece
@@ -1853,6 +2310,34 @@ void start_game(void) {
 	score_board->show_digit(game_scene->get_score());
 	lines_board->show_digit(game_scene->get_total_lines());
 	continuation = next_round;
+	ready_go();
+}
+
+void start_game_record(void) {
+	begin_record();
+	start_game();
+}
+
+void start_game_replay(const char *file_name = record_file_name) {
+	static gc *dummy = new gc(NULL, [] (void *) {
+		delete game_scene;
+		game_scene = NULL;
+	});
+	piece *pc = record_first_piece(file_name);
+	if (!pc) {
+		notify_game_over();
+		return;
+	}
+	kill_timer(timer_animation);
+	clear_timer_queue = true;
+	stop_animation();
+	game_scene = new scene(pc, true);
+	draw_next(pc);
+	level_board->show_digit(game_scene->get_level());
+	score_board->show_digit(game_scene->get_score());
+	lines_board->show_digit(game_scene->get_total_lines());
+	continuation = record_play;
+	record_play(0);
 	ready_go();
 }
 //}}}
@@ -1921,16 +2406,15 @@ void game_over(void) {
 		new gc(delete_object,
 		bmp_stat = new_bitmap(wd, ht_stat));
 	}
-	started = game_scene->is_running();
-	stat[0] = game_scene->get_score() % max_digit;
-	stat[1] = game_scene->get_total_lines() % max_digit;
-	stat[2] = game_scene->get_total_spin() % max_digit;
-	stat[3] = game_scene->get_max_combo() % max_digit;
-	stat[4] = game_scene->get_total_tetris() % max_digit;
-	stat[5] = game_scene->get_total_spin_clear() % max_digit;
-	stat[6] = game_scene->get_total_b2b() % max_digit;
-	stat[7] = game_scene->get_total_bravo() % max_digit;
-	if (started) {
+	if (started = game_scene && game_scene->is_running()) {
+		stat[0] = game_scene->get_score() % max_digit;
+		stat[1] = game_scene->get_total_lines() % max_digit;
+		stat[2] = game_scene->get_total_spin() % max_digit;
+		stat[3] = game_scene->get_max_combo() % max_digit;
+		stat[4] = game_scene->get_total_tetris() % max_digit;
+		stat[5] = game_scene->get_total_spin_clear() % max_digit;
+		stat[6] = game_scene->get_total_b2b() % max_digit;
+		stat[7] = game_scene->get_total_bravo() % max_digit;
 		HBITMAP old_bmp = (HBITMAP)SelectObject(hdc_sub, bmp_stat);
 		char line[len_line + 1];
 		fill_bg(hdc_sub, wd, ht_stat);
@@ -1943,6 +2427,7 @@ void game_over(void) {
 	}
 	delete game_scene;
 	game_scene = NULL;
+	end_record();
 	continuation = show_language;
 	ani_game_over();
 }
@@ -1954,8 +2439,8 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 	HDC hdc;
 	PAINTSTRUCT ps;
 	static HWND button_start, button_help, button_terminate;
-	static HICON ico_start, ico_pause, ico_term, ico_term_gray;
-	static bool state_help = false;
+	static HICON ico_start, ico_record, ico_replay, ico_pause;
+	static bool state_help, state_down, state_up, error;
 	const int d = 15;
 	const int x = unit * (width + 2);
 	const int y = unit * (height + 1);
@@ -1976,9 +2461,9 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			x, y - size_big, size_big, size_big,\
 			win, (HMENU)id_start, instance, NULL);
 		new gc(destroy_icon,
-		ico_start = LoadIcon(instance, MAKEINTRESOURCE(102)));
+		ico_start = LoadIcon(instance, MAKEINTRESOURCE(IDI_START)));
 		new gc(destroy_icon,
-		ico_pause = LoadIcon(instance, MAKEINTRESOURCE(103)));
+		ico_pause = LoadIcon(instance, MAKEINTRESOURCE(IDI_PAUSE)));
 		SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_start);
 		button_help = CreateWindow("button", NULL,\
 			WS_CHILD | WS_VISIBLE | BS_CHECKBOX | BS_PUSHLIKE | BS_ICON,\
@@ -1986,26 +2471,36 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			size_small, size_small,\
 			win, (HMENU)id_help, instance, NULL);
 		new gc(destroy_icon,
-		ico_term = LoadIcon(instance, MAKEINTRESOURCE(104)));
-		SendMessage(button_help, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_term);
+		ico_record = LoadIcon(instance, MAKEINTRESOURCE(IDI_HELP)));
+		SendMessage(button_help, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_record);
 		button_terminate = CreateWindow("button", NULL,\
 			WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED | BS_ICON,\
 			client_width - unit - size_small, y - size_small,\
 			size_small, size_small,\
 			win, (HMENU)id_terminate, instance, NULL);
 		new gc(destroy_icon,
-		ico_term = LoadIcon(instance, MAKEINTRESOURCE(105)));
+		ico_record = LoadIcon(instance, MAKEINTRESOURCE(IDI_TERM)));
+		SendMessage(button_terminate, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_record);
 		new gc(destroy_icon,
-		ico_term_gray = LoadIcon(instance, MAKEINTRESOURCE(106)));
-		SendMessage(button_terminate, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_term_gray);
+		ico_record = LoadIcon(instance, MAKEINTRESOURCE(IDI_RECORD)));
+		new gc(destroy_icon,
+		ico_replay = LoadIcon(instance, MAKEINTRESOURCE(IDI_REPLAY)));
 		return 0; //}}}
 	case WM_SHOWWINDOW: //{{{
 		init_board();
-		welcome();
+		if (initial_play) {
+			SendMessage(button_start, BM_SETIMAGE,\
+				IMAGE_ICON, (LPARAM)ico_pause);
+			Button_Enable(button_terminate, true);
+			start_game_replay(initial_play);
+		} else {
+			welcome();
+		}
 		return 0; //}}}
 	case WM_PAINT: //{{{
 		hdc = BeginPaint(win, &ps);
-		BitBlt(hdc, 0, 0, client_width, client_height, hdc_main, 0, 0, SRCCOPY);
+		BitBlt(hdc, 0, 0, client_width, client_height,\
+			hdc_main, 0, 0, SRCCOPY);
 		EndPaint(win, &ps);
 		return 0; //}}}
 	case WM_TIMER: //{{{
@@ -2023,6 +2518,14 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			if (animation)
 				animation();
 			break;
+		case timer_action:
+			kill_timer(timer_action);
+			action_callback();
+			break;
+		case timer_second:
+			kill_timer(timer_second);
+			second_callback();
+			break;
 		}
 		return 0; //}}}
 	case WM_COMMAND: //{{{
@@ -2034,25 +2537,43 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 				Button_SetCheck(button_help, BST_UNCHECKED);
 			}
 			if (!game_scene) {
-				SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_pause);
-				SendMessage(button_terminate, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_term);
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_pause);
 				Button_Enable(button_terminate, true);
-				start_game();
+				if (state_down)
+					state_down = false, start_game_record();
+				else if (state_up)
+					state_up = false, start_game_replay();
+				else
+					start_game();
 			} else if (game_scene->is_paused()) {
-				SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_pause);
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_pause);
 				main_board->restore_bitmap();
 				next_board->restore_bitmap();
 				resume_timer(timer_animation);
+				if (game_scene->is_demo())
+					demo_control(false);
 				game_scene->control(false);
 			} else {
-				SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_start);
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_start);
 				game_scene->control(true);
+				if (game_scene->is_demo())
+					demo_control(true);
 				stop_timer(timer_animation);
 				clear_timer_queue = true;
 				main_board->save_bitmap();
 				next_board->save_bitmap();
 				next_board->flush_board();
-				draw_pause();
+				if (!global_exception) {
+					draw_pause();
+				} else {
+					if (!(global_exception & 1))
+						error = true,\
+						Button_Enable(button_start, false);
+					draw_exception(global_exception & 1);
+				}
 			}
 			break; //}}}
 		case id_help: //{{{
@@ -2088,8 +2609,11 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 				} else if (game_scene->is_paused()) {
 					draw_help();
 				} else {
-					SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_start);
+					SendMessage(button_start, BM_SETIMAGE,\
+						IMAGE_ICON, (LPARAM)ico_start);
 					game_scene->control(true);
+					if (game_scene->is_demo())
+						demo_control(true);
 					stop_timer(timer_animation);
 					clear_timer_queue = true;
 					main_board->save_bitmap();
@@ -2100,17 +2624,20 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 			}
 			break; //}}}
 		case id_terminate: //{{{
-			if (!game_scene)
-				break;
 			if ((HWND)lp == win) {
-				SendMessage(button_start, BM_SETIMAGE, IMAGE_ICON, (LPARAM)ico_start);
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_start);
+				Button_Enable(button_start, true);
 				Button_Enable(button_terminate, false);
+				error = false;
 				break;
 			}
 			if (state_help) {
 				state_help = false;
 				Button_SetCheck(button_help, BST_UNCHECKED);
 			}
+			if (!game_scene)
+				break;
 			if (!game_scene->is_paused()) {
 				game_scene->control(true);
 			} else {
@@ -2123,49 +2650,89 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 		SetFocus(win);
 		return 0; //}}}
 	case WM_KEYUP: //{{{
-		if (wp == VK_DOWN && game_scene && game_scene->is_running())
+		if (!game_scene) {
+			if (wp == VK_DOWN) {
+			if (state_down) {
+				state_down = false;
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_start);
+			}
+			} else if (wp == VK_UP) {
+			if (state_up) {
+				state_up = false;
+				Button_Enable(button_start, true);
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_start);
+			}
+			}
+		} else if (wp == VK_DOWN && game_scene->is_running() &&\
+			!game_scene->is_demo()) {
 			game_scene->soft_drop(false);
+		}
 		return 0; //}}}
 	case WM_KEYDOWN: //{{{
 		switch (wp) {
 		case VK_LEFT: //{{{
 			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
-				game_scene->shift_piece(true);
+				!game_scene->is_demo() && !game_scene->is_paused())
+				game_scene->shift_piece(false);
 			break; //}}}
 		case VK_RIGHT: //{{{
 			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
-				game_scene->shift_piece(false);
-			break; //}}}
-		case VK_UP: //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
-				game_scene->rotate_piece(true);
+				!game_scene->is_demo() && !game_scene->is_paused())
+				game_scene->shift_piece(true);
 			break; //}}}
 		case 'Z': //{{{
 			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
+				!game_scene->is_demo() && !game_scene->is_paused())
 				game_scene->rotate_piece(false);
 			break; //}}}
+		case VK_UP: //{{{
+			if (!game_scene) {
+			if (!state_up) {
+				if (state_down) {
+					state_down = false;
+				}
+				state_up = true;
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_replay);
+				if (!PathFileExists(record_file_name))
+					Button_Enable(button_start, false);
+			}
+			} else if (game_scene->is_running() &&\
+				!game_scene->is_demo() && !game_scene->is_paused()) {
+				game_scene->rotate_piece(true);
+			}
+			break; //}}}
 		case VK_DOWN: //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
+			if (!game_scene) {
+			if (!state_down) {
+				if (state_up) {
+					state_up = false;
+					Button_Enable(button_start, true);
+				}
+				state_down = true;
+				SendMessage(button_start, BM_SETIMAGE,\
+					IMAGE_ICON, (LPARAM)ico_record);
+			}
+			} else if (game_scene->is_running() &&\
+				!game_scene->is_demo() && !game_scene->is_paused()) {
 				game_scene->soft_drop(true);
+			}
 			break; //}}}
 		case VK_SPACE: //{{{
 			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_paused())
+				!game_scene->is_demo() && !game_scene->is_paused())
 				game_scene->sonic_drop(!game_scene->is_soft_drop());
 			break; //}}}
 		case VK_RETURN: //{{{
 			if (game_scene) {
-				if (game_scene->is_soft_drop() &&\
-					game_scene->is_running() &&\
-					!game_scene->is_paused())
-					hold_piece();
-				else
-					SendMessage(win, WM_COMMAND, (WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)win);
+			if (game_scene->is_soft_drop() && game_scene->is_running() &&\
+				!game_scene->is_demo() && !game_scene->is_paused())
+				hold_piece();
+			else if (!error)
+				SendMessage(win, WM_COMMAND,\
+					(WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)win);
 			}
 			break; //}}}
 		}
@@ -2178,14 +2745,50 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 }
 //}}}
 //{{{ WinMain()
-int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
+int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR cmdline, int) {
 	const char *app_name = "Tetris";
+	const char *file_name = "\\default.tetrec";
 	const unsigned int style = WS_OVERLAPPEDWINDOW &\
 		~(WS_MAXIMIZEBOX | WS_SIZEBOX);
 	MSG message;
 	WNDCLASSEX window_class;
 	RECT rect;
 	instance = inst;
+	//{{{ Initialize record path
+	int len = GetEnvironmentVariable("TETRIS_RECORD", NULL, 0);
+	if (len) {
+		new gc(free,
+		record_file_name = (char *)malloc(len));
+		GetEnvironmentVariable("TETRIS_RECORD", record_file_name, len);
+	} else {
+		len = GetEnvironmentVariable("TEMP", NULL, 0);
+		new gc(free,
+		record_file_name = (char *)malloc(len + strlen(file_name)));
+		GetEnvironmentVariable("TEMP", record_file_name, len);
+		strcat(record_file_name, file_name);
+	}
+	if (cmdline[0]) {
+		const char *ptr;
+		if (cmdline[0] != '"' || (ptr = CharNext(cmdline)) - cmdline != 1)
+			goto __copy;
+		do {
+			if (*ptr == '"' && CharNext(ptr) - ptr == 1)
+				break;
+		} while (ptr = CharNext(ptr));
+		if (!*ptr || (len = ptr - cmdline) <= 1)
+			goto __copy;
+		new gc(free,
+		initial_play = (char *)malloc(len));
+		strncpy(initial_play, cmdline + 1, len - 1);
+		initial_play[len - 1] = '\0';
+		goto __path;
+__copy:
+		initial_play = cmdline;
+__path:
+		if (!PathFileExists(initial_play))
+			initial_play = NULL;
+	}
+	//}}}
 	//{{{ Register window class
 	window_class.cbSize        = sizeof(WNDCLASSEX);
 	window_class.style         = CS_HREDRAW | CS_VREDRAW;
@@ -2194,14 +2797,14 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	window_class.cbWndExtra    = 0;
 	window_class.hInstance     = instance;
 	new gc(destroy_icon,
-	window_class.hIcon         = LoadIcon(instance, MAKEINTRESOURCE(100)));
+	window_class.hIcon         = LoadIcon(instance, MAKEINTRESOURCE(IDI_LOGO)));
 	window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
 	new gc(delete_object,
 	window_class.hbrBackground = CreateSolidBrush(gray));
 	window_class.lpszMenuName  = NULL;
 	window_class.lpszClassName = app_name;
 	new gc(destroy_icon,
-	window_class.hIconSm       = LoadIcon(instance, MAKEINTRESOURCE(101)));
+	window_class.hIconSm       = LoadIcon(instance, MAKEINTRESOURCE(IDI_LOGO_SMALL)));
 	if (!RegisterClassEx(&window_class)) {
 		MessageBox(NULL, "RegisterClassEx() Failed!", "Fatal", MB_ICONERROR);
 		gc::garbage_collect();
@@ -2228,11 +2831,18 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE, LPTSTR, int) {
 	UpdateWindow(window);
 	//}}}
 	//{{{ Message dispatch
-	while (GetMessage(&message, NULL, 0, 0)) {
+	while (1) {
+		if (global_exception) {
+			SendMessage(window, WM_COMMAND,\
+				(WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)window);
+			global_exception = 0;
+		}
 		if (clear_timer_queue) {
 			clear_timer_queue = false;
 			PeekMessage(&message, window, WM_TIMER, WM_TIMER, PM_REMOVE);
 		}
+		if (!GetMessage(&message, NULL, 0, 0))
+			break;
 		DispatchMessage(&message);
 	}
 	//}}}

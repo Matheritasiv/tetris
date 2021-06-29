@@ -1,5 +1,5 @@
 PRJNAME         := tetris
-LIBNAME         := gdi32
+LIBNAME         := gdi32 shlwapi
 
 EXENAME         := $(PRJNAME:%=%.exe)
 SRCNAME         := $(PRJNAME:%=%.cxx)

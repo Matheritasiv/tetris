@@ -1,22 +1,35 @@
+#define IDI_LOGO        100
+#define IDI_LOGO_SMALL  101
+#define IDI_START       102
+#define IDI_RECORD      103
+#define IDI_REPLAY      104
+#define IDI_PAUSE       105
+#define IDI_HELP        106
+#define IDI_TERM        107
+#define IDB_LANG        200
+#define IDB_INFO        201
+
+#ifndef __IN_CODE__
 #include<windows.h>
 
 // Icon resources
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
-100          ICON           ".\\tetris.ico"
-101          ICON           ".\\tetris_small.ico"
-102          ICON           ".\\start.ico"
-103          ICON           ".\\pause.ico"
-104          ICON           ".\\help.ico"
-105          ICON           ".\\terminate.ico"
-106          ICON           ".\\terminate_gray.ico"
-200          BITMAP         ".\\language.bmp"
-201          BITMAP         ".\\info.bmp"
+IDI_LOGO        ICON    ".\\tetris.ico"
+IDI_LOGO_SMALL  ICON    ".\\tetris_small.ico"
+IDI_START       ICON    ".\\start.ico"
+IDI_RECORD      ICON    ".\\record.ico"
+IDI_REPLAY      ICON    ".\\replay.ico"
+IDI_PAUSE       ICON    ".\\pause.ico"
+IDI_HELP        ICON    ".\\help.ico"
+IDI_TERM        ICON    ".\\terminate.ico"
+IDB_LANG        BITMAP  ".\\language.bmp"
+IDB_INFO        BITMAP  ".\\info.bmp"
 
 // Version Information resources
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 1 VERSIONINFO
-    FILEVERSION     1,0,0,1
-    PRODUCTVERSION  1,0,0,1
+    FILEVERSION     2,0,0,1
+    PRODUCTVERSION  2,0,0,1
     FILEOS          VOS_NT_WINDOWS32
     FILETYPE        VFT_APP
     FILESUBTYPE     VFT2_UNKNOWN
@@ -27,17 +40,17 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
     {
         BLOCK "0800C433"
         {
-            VALUE "Comments", "202018008006001"
-            VALUE "CompanyName", "面向对象程序设计大作业"
+            VALUE "Comments", ""
+            VALUE "CompanyName", "Matheritasiv"
             VALUE "FileDescription", "Classic Tetris Game"
-            VALUE "FileVersion", "1.0"
+            VALUE "FileVersion", "2.0"
             VALUE "InternalName", "Tetris"
             VALUE "LegalCopyright", "Matheritasiv@163.com"
             VALUE "LegalTrademarks", ""
             VALUE "OriginalFilename", "tetris.exe"
             VALUE "PrivateBuild", ""
             VALUE "ProductName", "Tetris"
-            VALUE "ProductVersion", "1.0"
+            VALUE "ProductVersion", "2.0"
             VALUE "SpecialBuild", ""
         }
     }
@@ -46,3 +59,4 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
         VALUE "Translation", 0x0800, 0xC433
     }
 }
+#endif
