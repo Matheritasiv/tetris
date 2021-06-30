@@ -293,6 +293,7 @@ typedef enum {
 	timer_action, timer_second
 } timer_id;
 const int num_timer = 5;
+int num_controlled = num_timer;
 bool clear_timer_queue = false;
 void kill_all_timer(void);
 
@@ -846,6 +847,7 @@ const int id_terminate = 3;
 void notify_next_round(uint8_t up) {
 	static uint8_t static_up;
 	static void (*wait_for_next_round)(void) = [] (void) {
+		num_controlled = num_timer - 1;
 		clear_timer_queue = true;
 		next_round(static_up);
 	};
@@ -2504,6 +2506,8 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 		EndPaint(win, &ps);
 		return 0; //}}}
 	case WM_TIMER: //{{{
+		if (clear_timer_queue && wp <= num_controlled)
+			return 0;
 		switch ((timer_id)(wp - 1)) {
 		case timer_drop:
 			kill_timer(timer_drop);
@@ -2838,8 +2842,11 @@ __path:
 			global_exception = 0;
 		}
 		if (clear_timer_queue) {
+			while (PeekMessage(&message, window,\
+				WM_TIMER, WM_TIMER, PM_REMOVE))
+				DispatchMessage(&message);
+			num_controlled = num_timer;
 			clear_timer_queue = false;
-			PeekMessage(&message, window, WM_TIMER, WM_TIMER, PM_REMOVE);
 		}
 		if (!GetMessage(&message, NULL, 0, 0))
 			break;
