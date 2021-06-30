@@ -2104,7 +2104,7 @@ piece *record_first_piece(const char *file_name) {
 	uint32_t index;
 	uint16_t code;
 	if ((record_file = CreateFile(\
-		file_name, GENERIC_READ, 0, NULL, OPEN_EXISTING,\
+		file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,\
 		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL))\
 			== INVALID_HANDLE_VALUE) {
 		MessageBox(NULL, "CreateFile() Failed!", "Error", MB_ICONERROR);
