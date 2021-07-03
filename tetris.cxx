@@ -290,11 +290,12 @@ void put_string(HDC hdc, bool big, bool slant, int scale,\
 //{{{ Timer control
 typedef enum {
 	timer_drop, timer_lock, timer_animation,
-	timer_action, timer_second
+	timer_action, timer_second, timer_key
 } timer_id;
-const int num_timer = 5;
-int num_controlled = num_timer;
-bool clear_timer_queue = false;
+const int num_timer = 6;
+const int initial_num_controlled = 5;
+int num_controlled = initial_num_controlled;
+bool clear_timer_queue;
 void kill_all_timer(void);
 
 void set_timer(timer_id timer, int delay) {
@@ -847,7 +848,7 @@ const int id_terminate = 3;
 void notify_next_round(uint8_t up) {
 	static uint8_t static_up;
 	static void (*wait_for_next_round)(void) = [] (void) {
-		num_controlled = num_timer - 1;
+		num_controlled = initial_num_controlled - 1;
 		clear_timer_queue = true;
 		next_round(static_up);
 	};
@@ -2435,14 +2436,128 @@ void game_over(void) {
 }
 //}}}
 //}}}
+//{{{ Keyboard control
+HWND button_start, button_help, button_terminate;
+HICON ico_start, ico_record, ico_replay, ico_pause;
+bool state_help, state_down, state_up, error;
+bool repeated, clear_timer_key;
+uint32_t pressed_key;
+//{{{ Key up event
+void keyup_proc(uint32_t key) {
+	if (!game_scene) {
+		if (key == VK_DOWN) {
+		if (state_down) {
+			state_down = false;
+			SendMessage(button_start, BM_SETIMAGE,\
+				IMAGE_ICON, (LPARAM)ico_start);
+		}
+		} else if (key == VK_UP) {
+		if (state_up) {
+			state_up = false;
+			if (!IsWindowEnabled(button_start))
+				Button_Enable(button_start, true);
+			SendMessage(button_start, BM_SETIMAGE,\
+				IMAGE_ICON, (LPARAM)ico_start);
+		}
+		}
+	} else if (key == VK_DOWN && game_scene->is_running() &&\
+		!game_scene->is_demo()) {
+		game_scene->soft_drop(false);
+	}
+	return;
+}
+//}}}
+//{{{ Key down event
+void keydown_proc(uint32_t key) {
+	switch (key) {
+	case VK_LEFT: //{{{
+		if (game_scene && game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused())
+			game_scene->shift_piece(false);
+		break; //}}}
+	case VK_RIGHT: //{{{
+		if (game_scene && game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused())
+			game_scene->shift_piece(true);
+		break; //}}}
+	case 'Z': //{{{
+		if (game_scene && game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused())
+			game_scene->rotate_piece(false);
+		break; //}}}
+	case VK_UP: //{{{
+		if (!game_scene) {
+		if (!state_up) {
+			if (state_down)
+				state_down = false;
+			state_up = true;
+			SendMessage(button_start, BM_SETIMAGE,\
+				IMAGE_ICON, (LPARAM)ico_replay);
+			if (!PathFileExists(record_file_name))
+				Button_Enable(button_start, false);
+		}
+		} else if (game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused()) {
+			game_scene->rotate_piece(true);
+		}
+		break; //}}}
+	case VK_DOWN: //{{{
+		if (!game_scene) {
+		if (!state_down) {
+			if (state_up) {
+				state_up = false;
+				if (!IsWindowEnabled(button_start))
+					Button_Enable(button_start, true);
+			}
+			state_down = true;
+			SendMessage(button_start, BM_SETIMAGE,\
+				IMAGE_ICON, (LPARAM)ico_record);
+		}
+		} else if (game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused()) {
+			game_scene->soft_drop(true);
+		}
+		break; //}}}
+	case VK_SPACE: //{{{
+		if (game_scene && game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused())
+			game_scene->sonic_drop(GetKeyState(VK_DOWN) >= 0);
+		break; //}}}
+	case VK_RETURN: //{{{
+		if (game_scene) {
+		if (GetKeyState(VK_DOWN) < 0 && game_scene->is_running() &&\
+			!game_scene->is_demo() && !game_scene->is_paused())
+			hold_piece();
+		else if (!error)
+			SendMessage(window, WM_COMMAND,\
+				(WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)window);
+		}
+		break; //}}}
+	}
+	return;
+}
+
+void key_callback(void) {
+	if (!pressed_key || GetKeyState(pressed_key) >= 0) {
+		kill_timer(timer_key);
+		repeated = false;
+		clear_timer_key = true;
+		return;
+	}
+	if (!repeated) {
+		repeated = true;
+		set_timer(timer_key, 20);
+	}
+	keydown_proc(pressed_key);
+	return;
+}
+//}}}
+//}}}
 
 //{{{ Message Loop
 LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 	HDC hdc;
 	PAINTSTRUCT ps;
-	static HWND button_start, button_help, button_terminate;
-	static HICON ico_start, ico_record, ico_replay, ico_pause;
-	static bool state_help, state_down, state_up, error;
 	const int d = 15;
 	const int x = unit * (width + 2);
 	const int y = unit * (height + 1);
@@ -2529,6 +2644,10 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 		case timer_second:
 			kill_timer(timer_second);
 			second_callback();
+			break;
+		case timer_key:
+			if (!clear_timer_key)
+				key_callback();
 			break;
 		}
 		return 0; //}}}
@@ -2654,92 +2773,22 @@ LRESULT CALLBACK window_proc(HWND win, UINT msg, WPARAM wp, LPARAM lp) {
 		SetFocus(win);
 		return 0; //}}}
 	case WM_KEYUP: //{{{
-		if (!game_scene) {
-			if (wp == VK_DOWN) {
-			if (state_down) {
-				state_down = false;
-				SendMessage(button_start, BM_SETIMAGE,\
-					IMAGE_ICON, (LPARAM)ico_start);
-			}
-			} else if (wp == VK_UP) {
-			if (state_up) {
-				state_up = false;
-				Button_Enable(button_start, true);
-				SendMessage(button_start, BM_SETIMAGE,\
-					IMAGE_ICON, (LPARAM)ico_start);
-			}
-			}
-		} else if (wp == VK_DOWN && game_scene->is_running() &&\
-			!game_scene->is_demo()) {
-			game_scene->soft_drop(false);
-		}
+		if (wp == pressed_key)
+			pressed_key = 0;
+		keyup_proc(wp);
 		return 0; //}}}
 	case WM_KEYDOWN: //{{{
-		switch (wp) {
-		case VK_LEFT: //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused())
-				game_scene->shift_piece(false);
-			break; //}}}
-		case VK_RIGHT: //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused())
-				game_scene->shift_piece(true);
-			break; //}}}
-		case 'Z': //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused())
-				game_scene->rotate_piece(false);
-			break; //}}}
-		case VK_UP: //{{{
-			if (!game_scene) {
-			if (!state_up) {
-				if (state_down) {
-					state_down = false;
-				}
-				state_up = true;
-				SendMessage(button_start, BM_SETIMAGE,\
-					IMAGE_ICON, (LPARAM)ico_replay);
-				if (!PathFileExists(record_file_name))
-					Button_Enable(button_start, false);
-			}
-			} else if (game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused()) {
-				game_scene->rotate_piece(true);
-			}
-			break; //}}}
-		case VK_DOWN: //{{{
-			if (!game_scene) {
-			if (!state_down) {
-				if (state_up) {
-					state_up = false;
-					Button_Enable(button_start, true);
-				}
-				state_down = true;
-				SendMessage(button_start, BM_SETIMAGE,\
-					IMAGE_ICON, (LPARAM)ico_record);
-			}
-			} else if (game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused()) {
-				game_scene->soft_drop(true);
-			}
-			break; //}}}
-		case VK_SPACE: //{{{
-			if (game_scene && game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused())
-				game_scene->sonic_drop(!game_scene->is_soft_drop());
-			break; //}}}
-		case VK_RETURN: //{{{
-			if (game_scene) {
-			if (game_scene->is_soft_drop() && game_scene->is_running() &&\
-				!game_scene->is_demo() && !game_scene->is_paused())
-				hold_piece();
-			else if (!error)
-				SendMessage(win, WM_COMMAND,\
-					(WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)win);
-			}
-			break; //}}}
-		}
+		if (wp == pressed_key)
+			return 0;
+		keydown_proc(pressed_key = wp);
+		repeated = false;
+		clear_timer_key = true;
+		if (wp == VK_LEFT || wp == VK_RIGHT)
+			set_timer(timer_key, 150);
+		else if (wp == VK_DOWN)
+			set_timer(timer_key, 300);
+		else
+			set_timer(timer_key, 500);
 		return 0; //}}}
 	case WM_CLOSE: case WM_DESTROY: //{{{
 		PostQuitMessage(0);
@@ -2841,12 +2890,12 @@ __path:
 				(WPARAM)BN_CLICKED << 16 | id_start, (LPARAM)window);
 			global_exception = 0;
 		}
-		if (clear_timer_queue) {
+		if (clear_timer_queue || clear_timer_key) {
 			while (PeekMessage(&message, window,\
 				WM_TIMER, WM_TIMER, PM_REMOVE))
 				DispatchMessage(&message);
-			num_controlled = num_timer;
-			clear_timer_queue = false;
+			num_controlled = initial_num_controlled;
+			clear_timer_queue = clear_timer_key = false;
 		}
 		if (!GetMessage(&message, NULL, 0, 0))
 			break;
