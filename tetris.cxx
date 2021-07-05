@@ -1,5 +1,6 @@
 #include<cstdint>
 #include<cstdlib>
+#include<cstdio>
 #include<ctime>
 #include<cmath>
 #include<map>
