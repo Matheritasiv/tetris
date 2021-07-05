@@ -14,7 +14,7 @@ Platform: Windows
 
 #### Version 2.0: Record and Replay
 
-You can record and replay a match of game. Press <kbd>↓</kbd> to record and <kbd>↑</kbd> to replay. The record file path is assigned by environment variable `%TETRIS_RECORD%`.
+You can record and replay a match of game. Press <kbd>↓</kbd> to record and <kbd>↑</kbd> to replay. The record file path is specified in the environment variable `%TETRIS_RECORD%`.
 
 ## License
 
